@@ -77,3 +77,17 @@ The choice avoids adopting retired ViGEm as new infrastructure. VHF is selected 
 - Supabase mirroring is best-effort and disabled unless explicitly configured. The migration was not deployed.
 - There is no live keyboard, mouse, gamepad, Remote Play, or ARK controller backend.
 - The stop file preempts the next action boundary; it cannot cancel a Windows capture call already in progress.
+## 2026-09-25 Lappy exact-main verification
+
+After current-main integration, the exact source subject was reconstructed on the connected Lappy Desktop Commander execution host and verified with CPython 3.12.10:
+
+- editable install: PASS;
+- `py -m pytest -q`: **19/19 PASS**;
+- `py -m compileall -q src tests`: PASS;
+- `py -m vera_ark demo --steps 2 --log-dir .vera_ark\\local-verify`: PASS;
+- completed steps: 2;
+- forced release recorded: true;
+- no live controller backend was introduced or exercised.
+
+The repository's private GitHub Actions jobs were observed failing before any workflow step executed; that result is not treated as source-test evidence either way. Local Lappy verification is the execution evidence for this integration cut.
+
