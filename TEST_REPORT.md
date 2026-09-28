@@ -50,7 +50,7 @@ python -m pip install --no-build-isolation --no-deps --target <target-directory>
 PYTHONPATH=<target-directory> python -m vera_ark demo --steps 1 --log-dir <temporary-directory>
 ```
 
-The GitHub workflow independently installs and tests Python 3.11 on `windows-latest` and `ubuntu-latest`. No same-head workflow result existed at local handoff time.
+The GitHub workflow is configured to install and test Python 3.11 on `windows-latest` and `ubuntu-latest`. Current private-repository runs are blocked before step execution by the account billing/spending gate documented above, so they provide neither source-failure evidence nor a workflow PASS.
 
 ## Transport decision
 
