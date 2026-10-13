@@ -67,6 +67,7 @@ class VeraArkRuntime:
         storage: OperationalStorage,
         memory: MemoryAdapter | None = None,
         sleeper: Callable[[float], None] = time.sleep,
+        motion_guard: Callable[[object], object] | None = None,
     ) -> None:
         self.config = config
         self.capture = capture
@@ -76,6 +77,7 @@ class VeraArkRuntime:
         self.storage = storage
         self.memory = memory or NullMemoryAdapter()
         self.sleeper = sleeper
+        self.motion_guard = motion_guard
 
     def _stop_requested(self) -> bool:
         return self.config.stop_file.exists()
@@ -151,6 +153,14 @@ class VeraArkRuntime:
                     )
                     break
 
+                if self.motion_guard is not None:
+                    # The guard must fail closed BEFORE controller serialization.
+                    # It may reject motion, but cannot authorize live output.
+                    decision = self.motion_guard(intention)
+                    self.storage.event("PHYSICA_MOTION_GUARD", {
+                        "session_id": session_id, "step": step,
+                        "decision": getattr(decision, "status", "UNKNOWN"),
+                    })
                 receipt = self.controller.execute(intention)
                 self.storage.event("DRY_RUN_ACTION_RECORDED", receipt.to_dict())
                 completed += 1
