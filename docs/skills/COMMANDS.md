@@ -2,9 +2,9 @@
 
 **Branch:** skill/command-state-evidence-20261013. **Status:** pure UI-state planner, with no controller input, credentials or authenticated server effect.
 
-The module \`vera_ark.skill_commands\` enforces a small finite-state sequence: GAMEPLAY → PAUSE_MENU → ADMIN_BAR → COMMAND_BUTTON_SELECTED → observation after one submit. It also recognizes RESPAWN, TEXT_KEYBOARD, and UNKNOWN as fail-closed states. It only plans an isolated UI operation, with \`automatic_execution_permitted=False\`; a separate authorized controller adapter would still need explicit live binding and a release guarantee.
+The module `vera_ark.skill_commands` enforces a small finite-state sequence: GAMEPLAY → PAUSE_MENU → ADMIN_BAR → COMMAND_BUTTON_SELECTED → observation after one submit. It also recognizes RESPAWN, TEXT_KEYBOARD, and UNKNOWN as fail-closed states. It only plans an isolated UI operation, with `automatic_execution_permitted=False`; a separate authorized controller adapter would still need explicit live binding and a release guarantee.
 
-The username, admin password and any credential-containing text are **not** passed to this module or logged. The only command text eligible for screen comparison is credential-free \`cheat god\`, supplied by the user. A submitted \`cheat god\` **toggles** immunity rather than safely confirming a status, so a second invocation must be blocked after a submission within the same episode. A blank confirmation is **not** evidence of failure, nor reason to resend. User-reported god mode after personal takeover is an input fact; this branch does not claim to have independently verified immunity.
+The username, admin password and any credential-containing text are **not** passed to this module or logged. The only command text eligible for screen comparison is credential-free `cheat god`, supplied by the user. A submitted `cheat god` **toggles** immunity rather than safely confirming a status, so a second invocation must be blocked after a submission within the same episode. A blank confirmation is **not** evidence of failure, nor reason to resend. User-reported god mode after personal takeover is an input fact; this branch does not claim to have independently verified immunity.
 
 ## Actual discovered failure modes
 
