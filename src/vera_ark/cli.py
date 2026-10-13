@@ -83,7 +83,7 @@ def _run_runtime(
         from .physica_guard import PhysicaMotionGuard
         from physica.ark_bridge import MotionCalibration
         from physica.spatial import AABB
-        payload = json.loads(motion_guard_file.read_text(encoding="utf-8"))
+        payload = json.loads(motion_guard_file.read_text(encoding="utf-8-sig"))
         fields = {"schema", "position_m", "x_axis", "y_axis", "radius_m", "obstacles"}
         if type(payload) is not dict or set(payload) != fields or payload["schema"] != "VERA_ARK_PHYSICA_GUARD_CONFIG_V1":
             raise ValueError("motion guard config must match exact V1 schema")

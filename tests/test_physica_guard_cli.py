@@ -11,7 +11,7 @@ def test_cli_explicit_physics_guard_synthetic_demo(tmp_path, capsys):
         "obstacles": [{"id": "wall", "lower": [0.9, -0.2], "upper": [1.1, 0.2]}],
     }
     p = tmp_path/"model.json"
-    p.write_text(json.dumps(config))
+    p.write_text(json.dumps(config), encoding="utf-8-sig")
     assert cli.main(["demo","--steps","1","--log-dir",str(tmp_path/"logs"),
                      "--motion-guard-config",str(p)]) == 0
     assert "release_recorded" in capsys.readouterr().out
