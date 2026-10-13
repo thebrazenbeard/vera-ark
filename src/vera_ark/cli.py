@@ -76,7 +76,29 @@ def _run_runtime(
     log_dir: Path,
     stop_file: Path,
     memory_file: Path | None,
+    motion_guard_file: Path | None = None,
 ) -> int:
+    motion_guard = None
+    if motion_guard_file is not None:
+        from .physica_guard import PhysicaMotionGuard
+        from physica.ark_bridge import MotionCalibration
+        from physica.spatial import AABB
+        payload = json.loads(motion_guard_file.read_text(encoding="utf-8"))
+        fields = {"schema", "position_m", "x_axis", "y_axis", "radius_m", "obstacles"}
+        if type(payload) is not dict or set(payload) != fields or payload["schema"] != "VERA_ARK_PHYSICA_GUARD_CONFIG_V1":
+            raise ValueError("motion guard config must match exact V1 schema")
+        if type(payload["obstacles"]) is not list or len(payload["obstacles"]) > 256:
+            raise ValueError("motion guard obstacles must be a list of at most 256")
+        boxes = []
+        for item in payload["obstacles"]:
+            if type(item) is not dict or set(item) != {"id", "lower", "upper"}:
+                raise ValueError("invalid obstacle shape")
+            boxes.append(AABB(item["id"], tuple(item["lower"]), tuple(item["upper"])))
+        motion_guard = PhysicaMotionGuard(
+            position_m=tuple(payload["position_m"]),
+            calibration=MotionCalibration(tuple(payload["x_axis"]), tuple(payload["y_axis"])),
+            radius_m=payload["radius_m"], obstacles=boxes,
+        )
     storage = _storage(log_dir)
     controller = DryRunController(storage)
     memory = JsonlMemoryAdapter(memory_file) if memory_file else None
@@ -93,6 +115,7 @@ def _run_runtime(
         controller=controller,
         storage=storage,
         memory=memory,
+        motion_guard=motion_guard,
     )
     result = runtime.run()
     _json_print(result.to_dict())
@@ -111,6 +134,7 @@ def demo_command(args: argparse.Namespace) -> int:
             log_dir=log_dir,
             stop_file=args.stop_file,
             memory_file=args.memory_file,
+            motion_guard_file=args.motion_guard_config,
         )
     except Exception as exc:
         print(f"demo failed: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -150,6 +174,7 @@ def run_command(args: argparse.Namespace) -> int:
             log_dir=log_dir,
             stop_file=args.stop_file,
             memory_file=args.memory_file,
+            motion_guard_file=args.motion_guard_config,
         )
     except (CaptureError, OSError, ValueError) as exc:
         print(f"run failed: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -170,6 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--log-dir", type=Path)
     demo.add_argument("--stop-file", type=Path, default=Path(".vera_ark/STOP"))
     demo.add_argument("--memory-file", type=Path)
+    demo.add_argument("--motion-guard-config", type=Path, help="explicit dry-run Physica world model JSON")
     demo.set_defaults(func=demo_command)
 
     capture = sub.add_parser("capture", help="capture one Windows monitor to PNG")
@@ -185,6 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--log-dir", type=Path)
     run.add_argument("--stop-file", type=Path, default=Path(".vera_ark/STOP"))
     run.add_argument("--memory-file", type=Path)
+    run.add_argument("--motion-guard-config", type=Path, help="explicit dry-run Physica world model JSON")
     run.set_defaults(func=run_command)
     return parser
 
