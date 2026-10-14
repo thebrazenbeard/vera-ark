@@ -16,8 +16,8 @@ def observed(x, dx, *, dy=0, scene="BEACH", duration=240, tracks=200,
 
 class YawResponseTests(unittest.TestCase):
     def test_reversed_sign_and_static_shift_is_candidate_only(self):
-        left = observed(-.36, +50, -.15, tracks=214)
-        right = observed(+.36, -56.45, .42, tracks=196)
+        left = observed(-.36, +50, dy=-.15, tracks=214)
+        right = observed(+.36, -56.45, dy=.42, tracks=196)
         result = assess_yaw_reversal(left, right, idle_median_dx=0.0)
         self.assertEqual(result.disposition, "CANDIDATE_REVERSIBLE_YAW")
         self.assertFalse(result.automatic_execution_permitted)
