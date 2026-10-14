@@ -31,6 +31,13 @@ class YawResponseTests(unittest.TestCase):
         self.assertEqual(result.experimental_magnitude, .28)
         self.assertFalse(result.automatic_execution_permitted)
 
+    def test_bracket_narrows_after_measured_intermediate_response(self):
+        weak = observed(-.20, 0, duration=240, tracks=209)
+        strong = observed(-.28, 14.34, duration=240, tracks=210)
+        next_trial = next_yaw_response_probe(weak, strong)
+        self.assertEqual(next_trial.experimental_magnitude, .24)
+        self.assertFalse(next_trial.automatic_execution_permitted)
+
     def test_mismatched_context_is_unknown(self):
         result = assess_yaw_reversal(
             observed(-.36, 50, scene="BEACH"),
