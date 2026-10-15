@@ -170,6 +170,10 @@ def audit_offline_session(events: object, actions: object) -> dict:
              len(plans) <= config["steps"], "incomplete frame/perception chain")
     _require(len(stops) <= 1 and end["stopped"] == bool(stops),
              "stop declaration mismatch")
+    _require(
+        (end["stopped"] and len(recorded) < config["steps"]) or
+        (not end["stopped"] and len(recorded) == config["steps"]),
+        "session completion/stop mismatch")
     if stops:
         stop_index, stop = stops[0]
         _require(stop_index < len(events) - 2 and
