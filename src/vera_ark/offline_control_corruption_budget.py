@@ -29,6 +29,9 @@ class ControlCorruptionBudgetReport:
     declared_direction_survives_budget: bool
     largest_single_pair_downward_capacity: float
     largest_single_pair_upward_capacity: float
+    worst_case_witness_trial_ids: tuple[str, ...]
+    best_case_witness_trial_ids: tuple[str, ...]
+    minimum_erasure_witness_trial_ids: tuple[str, ...]
     outcome_authenticity_verified: bool = False
     randomization_verified: bool = False
     causal_learning_verified: bool = False
@@ -72,17 +75,21 @@ def audit_control_corruption_budget(
         cell = (row["group_id"], row["first_arm"])
         cell_counts[cell] = cell_counts.get(cell, 0) + 1
 
-    downward: list[float] = []
-    upward: list[float] = []
+    downward_ranked: list[tuple[float, str]] = []
+    upward_ranked: list[tuple[float, str]] = []
     groups = validated.holdout_group_count
     for row in rows:
         cell = (row["group_id"], row["first_arm"])
         weight = 1.0 / (2 * groups * cell_counts[cell])
         residual = float(row["paired_delta"]) - float(row["negative_control_delta"])
-        downward.append(weight * (residual + 2.0))
-        upward.append(weight * (2.0 - residual))
-    downward.sort(reverse=True)
-    upward.sort(reverse=True)
+        downward_ranked.append((weight * (residual + 2.0), row["trial_id"]))
+        upward_ranked.append((weight * (2.0 - residual), row["trial_id"]))
+    # Exact-capacity ties use trial_id rather than input iteration order.
+    # Witnesses name caller-declared rows, not authenticated observations.
+    downward_ranked.sort(key=lambda item: (-item[0], item[1]))
+    upward_ranked.sort(key=lambda item: (-item[0], item[1]))
+    downward = [capacity for capacity, _ in downward_ranked]
+    upward = [capacity for capacity, _ in upward_ranked]
 
     value = validated.descriptive_primary_minus_control
     minimum = value - math.fsum(downward[:budget_pairs])
@@ -92,12 +99,15 @@ def audit_control_corruption_budget(
     maximum = min(2.0, maximum)
     if value > 0:
         edits = _min_edits_to_erase(value, downward)
+        erasure_witness = tuple(trial_id for _, trial_id in downward_ranked[:edits])
         survives = minimum > 0
     elif value < 0:
         edits = _min_edits_to_erase(value, upward)
+        erasure_witness = tuple(trial_id for _, trial_id in upward_ranked[:edits])
         survives = maximum < 0
     else:
         edits = 0
+        erasure_witness = ()
         survives = False
     return ControlCorruptionBudgetReport(
         schema=SCHEMA,
@@ -111,4 +121,11 @@ def audit_control_corruption_budget(
         declared_direction_survives_budget=survives,
         largest_single_pair_downward_capacity=downward[0],
         largest_single_pair_upward_capacity=upward[0],
+        worst_case_witness_trial_ids=tuple(
+            trial_id for _, trial_id in downward_ranked[:budget_pairs]
+        ),
+        best_case_witness_trial_ids=tuple(
+            trial_id for _, trial_id in upward_ranked[:budget_pairs]
+        ),
+        minimum_erasure_witness_trial_ids=erasure_witness,
     )
