@@ -1,0 +1,11 @@
+# ARK T42 — bounded exhaustive corruption oracle
+
+**Scope:** Offline-only mathematical falsification aid for T39/T40 greedy outcome-corruption budgets. No Chiaki, DS4, game capture, runtime route, credentials, or driver effects.
+
+A new `offline_corruption_exhaustive.py` enumerates all exact-k subsets of at most eight declared paired trial rows, replaces primary/control outcomes at their legal extremes, and recomputes the negative-control macro estimator for each subset. It also searches subsets in increasing size for the smallest sign-erasing corruption. Unlike the greedy algorithm, it does **not** derive or rank analytic row weights. `crosscheck_corruption_report` compares the independently enumerated extrema, capacities, direction survival, minimum erasure count, and replayed declared witnesses against the greedy report. An explicit eight-row cap rejects unbounded work.
+
+**Evidence:** T41 archive extracted locally, T42 source/tests added in isolation. Red collection failure (`ModuleNotFoundError`) reproduced before implementation. Local Python 3.13 `PYTHONPATH=src python -m pytest -q`: **372/372 synthetic tests passed**, including 13 T42 tests; compilation passed. Randomized fixed-layout checks cover 65 seeded cases. No GitHub CI or independent review claim. Main remains at `7e4b8469c6c4d5918556e3f80a54f9335238a0c3`; Vera Mono main at `16a2828dfa7fb7e6c0e19004f014bc68fc47badf`. Open Draft PRs #12/#13/#14/#21/#22 are distinct and untouched.
+
+> **Internal hostile review — GPT-6 / OpenAI:** The exhaustive oracle shares the same macro evaluator and caller-declared rows as the greedy source; it is algorithmically different, not an independent experimental replication. Exhaustive search is capped at eight pairs and cannot validate larger reports. Floating-point near-zero sign decisions and numerical tolerance can obscure marginal cases; exact rational arithmetic would be a stronger follow-up. A fabricated dataset can pass both algorithms. The output does not establish real controller inputs, authentic scenes, randomized trials, causal learning, or independent review.
+
+**Authority:** Research branch only, Draft if PR created; no merge, deployment, driver installation, provider changes, or protected effects.
