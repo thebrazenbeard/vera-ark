@@ -7,6 +7,7 @@ controller effects, or learning. It never silently drops missing/invalid trials.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from fractions import Fraction
 import math
 import re
 from typing import Mapping
@@ -52,6 +53,22 @@ def _finite_metric(value: object, label: str) -> float:
     if not math.isfinite(numeric) or abs(numeric) > MAX_ABS_METRIC:
         raise ValueError(f"{label} must be finite and bounded")
     return numeric
+
+
+def _outward_mean(total: Fraction, count: int, *, lower: bool) -> float:
+    """Represent the exact rational mean with a conservative binary64 endpoint.
+
+    math.fsum minimizes rounding error but does not guarantee interval bounds.
+    This checks the converted endpoint against the exact binary-input rational.
+    """
+    exact = total / count
+    approximate = float(exact)
+    rounded = Fraction.from_float(approximate)
+    if lower and rounded > exact:
+        return math.nextafter(approximate, -math.inf)
+    if not lower and rounded < exact:
+        return math.nextafter(approximate, math.inf)
+    return approximate
 
 
 def audit_trial_dispositions(
@@ -108,8 +125,14 @@ def audit_trial_dispositions(
     n = len(expected_trial_ids)
     unobserved = n - counts["OBSERVED"]
     observed_sum = math.fsum(values)
-    lower = math.fsum((observed_sum, unobserved * low)) / n
-    upper = math.fsum((observed_sum, unobserved * high)) / n
+    # Preserve exact binary-input arithmetic until the final outward rounding.
+    # This prevents a rounded "lower bound" from exceeding the exact minimum,
+    # or an "upper bound" from falling below the exact maximum.
+    exact_observed_sum = sum((Fraction.from_float(v) for v in values), Fraction(0))
+    lower = _outward_mean(exact_observed_sum + unobserved * Fraction.from_float(low),
+                          n, lower=True)
+    upper = _outward_mean(exact_observed_sum + unobserved * Fraction.from_float(high),
+                          n, lower=False)
     return TrialDispositionAssessment(
         schema=SCHEMA,
         trial_ids=expected_trial_ids,
