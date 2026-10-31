@@ -1,154 +1,81 @@
-> **License:** Source-visible, not open source. Original material is proprietary. Commercial use, redistribution, hosted-service use, and commercial derivative products require written permission. See [LICENSE](LICENSE) and [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md). Separately identified third-party components retain their own licenses.
+> **License:** Source-visible, not open source. The original material is proprietary. Private, noncommercial evaluation is permitted under [LICENSE](LICENSE); redistribution, commercial use, hosted deployment, and commercial derivatives require written permission. See [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md). Third-party material retains its own rights.
 
-# VERA ARK Player v0.1
+# VERA ARK — bounded perception-to-intention runtime
 
-A Windows-first, local, safety-bounded runtime scaffold for an independent ARK survivor. Version 0.1 captures a monitor, creates structured perception records, produces one bounded high-level action intention, maps it into an exact DualShock 4 USB input-report contract, and verifies the serialized bytes through a **loopback-only transport**. It does not send keyboard, mouse, gamepad, Remote Play, virtual-HID, or network controller input.
+**A Python research toolkit for capturing or synthesizing a visual frame, producing a validated high-level action intention, and examining what a gamepad report *would* contain—without transmitting controller input.**
 
-## Safety boundary
+VERA ARK v0.1 implements a deliberately limited vertical slice for experiments involving ARK gameplay and PlayStation-style controls. Its reusable components include strict action schemas, an offline heuristic planner, an optional visual-model adapter, DS4 report serialization, a loopback-only transport, JSONL evidence logs, and an optional spatial motion guard. It is **not** an autonomous game-playing agent or a live controller.
 
-- There is no live controller backend in this release.
-- Every action intention is schema-validated, finite, range-bounded to `[-1, 1]`, duration-bounded to 1000 ms, and marked `dry_run=true`.
-- Unknown fields, unknown actions, stale steps, duplicate intentions, non-finite numbers, report-version drift, and live-output requests fail closed.
-- Every non-neutral DS4 report batch ends with a matched neutral release report.
-- A stop file is checked before capture and again before action serialization.
-- Every runtime exit records and loopback-verifies the exact neutral `RELEASE_ALL` report.
-- OpenAI, Supabase, and optional memory are adapters. Their absence or failure cannot enable controller output.
+## What works today
 
-## Requirements
+| Component | Implemented behavior | Boundary |
+| --- | --- | --- |
+| Synthetic demo | Offline image → perception → planning → action validation → DS4 serialization → local loopback verification | Runs without Windows capture, OpenAI, Supabase, or a controller |
+| Monitor capture | Windows GDI capture of an explicitly selected display to PNG | Requires an interactive Windows desktop; no screen capture on Linux/macOS |
+| Planning | Deterministic heuristic, or optional OpenAI vision proposal with local validation and fallback | No trained ARK survival policy; model output is untrusted |
+| DS4 transport | Exact 64-byte USB report and versioned atomic report-batch envelope | **Loopback only**; no HID, keyboard, mouse, Remote Play, or gamepad output |
+| State and safety | Strict schema/range/step checks, stop-file checks, validated JSONL append, forced neutral release evidence | A recorded release does not prove a physical device was released |
+| Physica guard | Optional broad-phase collision-candidate veto for a dry-run `MOVE` | Requires explicit hypothetical coordinates/calibration and Physica 0.3.0+ |
 
-- Windows 10 or 11 for real monitor capture
-- 64-bit Python 3.11
-- No mandatory third-party runtime packages
+The current controller backend is `VERA_ARK_DS4_LOOPBACK_V1`. A Microsoft VHF/KMDF driver interface is **specified, not implemented or installed**; the selected `VERA_ARK_MICROSOFT_VHF_KMDF_DS4_V1` contract cannot grant permission to create or operate one.
 
-## Install on Windows
+## Quick start — offline and portable
+
+Python **3.11+** is required; the core package has no mandatory third-party runtime dependencies. In a checkout:
+
+```sh
+python -m venv .venv
+python -m pip install -e .
+python -m vera_ark doctor
+python -m vera_ark demo --steps 2 --log-dir ./demo-output
+```
+
+Activate the virtual environment first if your Python installation requires it. The `demo` command uses a deterministic synthetic image and a local heuristic; it does not need a game, a display, a controller, or credentials.
+
+Inspect `demo-output/events.jsonl` and `demo-output/actions.jsonl`. The result should report `release_recorded: true`; the action ledger ends in `RELEASE_ALL`, and dry-run receipts record zero external inputs. The log directory is an output artifact, not a host authorization or immutable audit store.
+
+For Windows display capture and a bounded visual dry run:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\setup.ps1 -WithDev
-.\.venv\Scripts\Activate.ps1
+python -m vera_ark capture --monitor 0 --output .vera_ark/capture.png
+python -m vera_ark run --monitor 0 --planner heuristic --steps 5 --interval 1
 ```
 
-`setup.ps1` is idempotent for an existing `.venv`. Do not put secrets in the repository. Copy `.env.example` to a local `.env` only if you have your own environment loader; this package reads process environment variables directly.
+Monitor indexes are zero-based. A Windows capture sees the selected desktop, so close sensitive windows first. No command above can operate an actual controller. See the [Windows first-test protocol](docs/FIRST_TEST.md) for the two-terminal stop-file exercise, expected receipts, and later Remote Play qualification requirements.
 
-## Required commands
+## Optional adapters and explicit safety controls
 
-```powershell
-vera-ark doctor
-vera-ark demo
-vera-ark capture --monitor 0 --output .vera_ark\capture.png
-vera-ark run --monitor 0 --planner heuristic --steps 5 --interval 1
-```
+- **Visual model:** `--planner openai` uses `OPENAI_API_KEY` and optional `OPENAI_MODEL`. It submits a PNG to the Responses API, accepts only a bounded schema-checked suggestion, and falls back to the offline planner on missing credentials or invalid responses. A provider label or successful API response is not host-authenticated authority.
+- **Memory:** `--memory-file path.jsonl` reads text-only `{"text":"..."}` rows. Corrupt input disables that optional context; it never authorizes an action.
+- **Event mirroring:** `SUPABASE_URL` and `SUPABASE_ANON_KEY` optionally enable best-effort event delivery. The [SQL migration](supabase/migrations/0001_agent_memory.sql) is only a source artifact, not an applied database or a credential/consent grant.
+- **Emergency stop:** The default `.vera_ark/STOP` file is checked before each capture and again before action serialization. It does **not** cancel a capture already executing. Every exit attempts to append and loopback-verify an exact neutral `RELEASE_ALL` report.
+- **Motion guard:** `--motion-guard-config model.json` is supported on both `demo` and `run`, with an explicitly supplied `VERA_ARK_PHYSICA_GUARD_CONFIG_V1` world model. Potential obstacle overlap or model failure rejects a dry-run `MOVE` *before* controller serialization; other intentions are not motion-guarded. See the [Physica guard contract and synthetic JSON example](docs/PHYSICA_DRY_RUN_MOTION_GUARD.md). A clear broad-phase result does not establish collision-free motion, calibrated game coordinates, or physical safety.
 
-Monitor indexes are zero-based. `doctor` reports the monitor count, active loopback contract, and the selected but unavailable future Windows backend.
+All action intentions are `dry_run=true`, finite, range bounded, and duration bounded; unknown actions and report versions fail closed. A non-neutral report batch must conclude with an exact neutral report. These are source-checked serialization invariants, **not** a live input-suppression security boundary against a malicious or privileged host.
 
-## Emergency stop
+## DS4 specification and future integration
 
-The default stop file is `.vera_ark\STOP`. Create it from another terminal:
+The source exposes two frozen version labels:
 
-```powershell
-New-Item -ItemType File -Force .vera_ark\STOP
-```
+- `VERA_ARK_DS4_USB_INPUT_REPORT_V1`: a 64-byte report with report ID `0x01`, neutral stick axes at 128, and defined button/trigger offsets.
+- `VERA_ARK_VHF_DS4_SUBMISSION_BATCH_V1`: a little-endian `VAD4` batch header with count, version and bounded report offsets. Any batch with non-neutral output must include a matched neutral report.
 
-Remove it before a later run:
+The byte-level implementation and validation are in [controller.py](src/vera_ark/controller.py) and [controller tests](tests/test_models.py). The future Windows driver selection and the **separate authorization, signing, device-inspection, and Remote Play tests that would be required** are described in [FIRST_TEST.md](docs/FIRST_TEST.md). No live driver source or approved controller-output path exists in v0.1.
 
-```powershell
-Remove-Item .vera_ark\STOP
-```
+## Verification
 
-The runtime checks the file before every capture and immediately before every dry-run action serialization. It cannot interrupt a capture already inside the Windows GDI call, because operating systems still insist that time is linear.
-
-## Exact DS4 transport contract
-
-The semantic action layer remains separate from the controller transport layer:
-
-- `MOVE` maps to the left stick.
-- `LOOK` maps to the right stick.
-- `INTERACT` maps to Cross, followed by neutral release.
-- `NOOP` and `RELEASE_ALL` map to the exact neutral report.
-
-The report contract is `VERA_ARK_DS4_USB_INPUT_REPORT_V1`:
-
-| Zero-based byte offset | Field | Range / meaning |
-|---:|---|---|
-| 0 | USB report ID | `0x01` |
-| 1 | left X | `0..255`, neutral `128` |
-| 2 | left Y | `0..255`, neutral `128` |
-| 3 | right X | `0..255`, neutral `128` |
-| 4 | right Y | `0..255`, neutral `128` |
-| 5 | buttons0 | D-pad `0x0F`; Square `0x10`; Cross `0x20`; Circle `0x40`; Triangle `0x80` |
-| 6 | buttons1 | L1 `0x01`; R1 `0x02`; L2 digital `0x04`; R2 digital `0x08`; Share `0x10`; Options `0x20`; L3 `0x40`; R3 `0x80` |
-| 7 | buttons2 | PS `0x01`; touchpad click `0x02` |
-| 8 | left trigger analog | `0..255` |
-| 9 | right trigger analog | `0..255` |
-| 10..63 | v0.1 unsupported fields | must be zero |
-
-The neutral report is exactly 64 bytes:
-
-```text
-01 80 80 80 80 08 00 00 00 00 00 00 00 00 00 00
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-```
-
-### Atomic submission envelope
-
-The future driver-facing batch is `VERA_ARK_VHF_DS4_SUBMISSION_BATCH_V1`:
-
-```text
-little-endian header: <4sHHII
-magic="VAD4"
-version=1
-report_size=64
-sequence=uint32
-report_count=1..8
-
-repeated entry: <I64s
-offset_ms=uint32, bounded 0..1000
-report=64-byte VERA_ARK_DS4_USB_INPUT_REPORT_V1
-```
-
-Offsets must begin at zero and be nondecreasing. Any batch containing a non-neutral report must end in the exact neutral report. The whole batch is one future driver request, preventing a button press from being accepted without its scheduled release.
-
-## Selected future Windows backend
-
-The selected transport is `VERA_ARK_MICROSOFT_VHF_KMDF_DS4_V1`, version 1:
-
-- Microsoft Virtual HID Framework (VHF), KMDF kernel-mode HID source driver
-- device interface GUID `{8F78C4F8-1D21-4C5C-BBAA-2D907D98C721}`
-- submit IOCTL `0x0022A004`
-- definition `CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_WRITE_DATA)`
-- driver validates the batch, queues reports, calls `VhfReadReportSubmit`, and forces neutral on handle close
-
-This is a selected interface contract, **not an implemented, installed, signed, or authorized driver**. ViGEm is deliberately not selected because its upstream project is retired and archived. VHF is the supported Windows framework for a custom virtual HID source, but it requires a separately authorized kernel driver, installation, signing, native device inspection, and Remote Play compatibility review.
-
-## Offline operation
-
-`vera-ark demo` uses a deterministic synthetic image and works without Windows capture, OpenAI, or Supabase. `--planner openai` is optional. With no `OPENAI_API_KEY`, or when the request or response fails validation, planning falls back to the local heuristic and logs `PLANNER_FALLBACK`.
-
-The optional OpenAI planner submits a PNG as an image input to the Responses API, parses one JSON action proposal, reconstructs internal identifiers locally, and subjects the result to the same strict action schema. It never talks to the controller directly.
-
-## Logs
-
-Each run creates two append-only JSONL ledgers:
-
-- `events.jsonl`: session, capture, perception, planner, stop, error, and release events
-- `actions.jsonl`: semantic intentions, raw DS4 report bytes, atomic submission-envelope bytes, loopback receipts, and `RELEASE_ALL`
-
-Existing ledgers are strictly validated before append. A malformed or sequence-broken ledger blocks the session rather than pretending history is fine.
-
-## Optional adapters
-
-- `--memory-file path.jsonl` accepts text-only rows shaped exactly as `{"text":"..."}`. Any corrupted row disables all memory context for that read.
-- `SUPABASE_URL` and `SUPABASE_ANON_KEY` enable best-effort event mirroring to `vera_ark_operational_events`. The included migration is a design artifact only and is not applied by the runtime.
-- `OPENAI_API_KEY` and optional `OPENAI_MODEL` enable the vision planner. No secret value is logged.
-
-## Development checks
-
-```powershell
-python -m pytest
+```sh
+python -m pip install -e ".[dev]"
+python -m pytest -q
 python -m compileall -q src tests
-vera-ark demo --steps 2 --log-dir .vera_ark\verification-demo
 ```
 
-See [docs/FIRST_TEST.md](docs/FIRST_TEST.md) for the first Windows test and the gated Remote Play compatibility plan. See [TEST_REPORT.md](TEST_REPORT.md) for verified results and limitations.
+The optional Physica guard tests also require Physica 0.3.0+ installed in the test environment. The base runtime and demo work without it. [TEST_REPORT.md](TEST_REPORT.md) records historical test environments and limits; those records are not proof of current Windows capture, live game behavior, host-installed drivers, or continuous qualification.
+
+At the audited public `main` revision, an isolated Python 3.12 run passed **19 base tests** without Physica and **25 full tests** after adding the current Physica source. An offline one-step demo completed and recorded neutral release. No physical Windows monitor, HID device, ARK session, or Remote Play host was exercised by this audit.
+
+## Rights and trust boundaries
+
+This is a source-visible proprietary research product, not freely redistributable open-source software. Read [LICENSE](LICENSE), [COMMERCIAL_LICENSE.md](COMMERCIAL_LICENSE.md), and [NOTICE](NOTICE) before reuse; contributions follow [CONTRIBUTING.md](CONTRIBUTING.md) and [CLA.md](CLA.md).
+
+An action proposal, valid schema, source test, report byte sequence, or simulated stop receipt is **not** consent, an authenticated provider identity, a host-owned immutable authority binding, or authorization for an external effect. Any future live controller or hosted integration must supply and verify those guarantees outside this package.
