@@ -39,9 +39,15 @@ def test_invalid_table_name_fails_closed(table: str) -> None:
         SupabaseEventAdapter(URL, KEY, table=table)
 
 
-def test_header_control_character_is_rejected() -> None:
+@pytest.mark.parametrize("key", ["key\r\nHost: bad", "synthetic-☃", "key with spaces", ""])
+def test_non_header_safe_mirror_key_is_rejected(key: str) -> None:
     with pytest.raises(ValueError):
-        SupabaseEventAdapter(URL, "key\r\nHost: bad")
+        SupabaseEventAdapter(URL, key)
+
+
+def test_visible_ascii_mirror_key_is_accepted_but_not_qualified() -> None:
+    adapter = SupabaseEventAdapter(URL, "sb_publishable_synthetic-123._=")
+    assert adapter.sink_qualified is False
 
 
 def test_mirror_does_not_call_provider_without_positive_sink_qualification(monkeypatch) -> None:
