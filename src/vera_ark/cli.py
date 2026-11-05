@@ -80,6 +80,8 @@ def _run_runtime(
     motion_guard_file: Path | None = None,
     allow_memory_to_openai: bool = False,
 ) -> int:
+    if type(allow_memory_to_openai) is not bool:
+        raise ValueError("external memory consent must be an explicit boolean")
     if allow_memory_to_openai and (planner_name != "openai" or memory_file is None):
         raise ValueError(
             "--allow-memory-to-openai requires --planner openai and --memory-file"
@@ -208,7 +210,7 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument(
         "--allow-memory-to-openai",
         action="store_true",
-        help="explicitly send --memory-file text to the external OpenAI Responses API for this run",
+        help="opt in to external memory if separately authorized; paid OpenAI requests remain disabled under $0 policy",
     )
     demo.add_argument("--motion-guard-config", type=Path, help="explicit dry-run Physica world model JSON")
     demo.set_defaults(func=demo_command)
@@ -229,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--allow-memory-to-openai",
         action="store_true",
-        help="explicitly send --memory-file text to the external OpenAI Responses API for this run",
+        help="opt in to external memory if separately authorized; paid OpenAI requests remain disabled under $0 policy",
     )
     run.add_argument("--motion-guard-config", type=Path, help="explicit dry-run Physica world model JSON")
     run.set_defaults(func=run_command)
