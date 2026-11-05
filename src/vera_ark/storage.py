@@ -20,6 +20,12 @@ class LedgerCorruptionError(RuntimeError):
     pass
 
 
+class LedgerBusyError(LedgerCorruptionError):
+    """A second writer or an unavailable OS lock must not corrupt the ledger."""
+
+    pass
+
+
 def canonical_json(value: Any) -> str:
     return json.dumps(
         value,
@@ -55,7 +61,51 @@ class AppendOnlyJsonl:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
-        self._sequence = self._validate_existing()
+        self._writer_lease = self._acquire_writer_lease()
+        try:
+            self._sequence = self._validate_existing()
+        except BaseException:
+            self.close()
+            raise
+
+    def _acquire_writer_lease(self):
+        """Nonblocking, OS-released single-writer ownership across processes."""
+        lease_path = self.path.with_name(self.path.name + ".writer.lock")
+        handle = lease_path.open("a+b")
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (ImportError, OSError) as exc:
+            handle.close()
+            raise LedgerBusyError("operational ledger already has a writer or no OS lock") from exc
+        return handle
+
+    def close(self) -> None:
+        lock = getattr(self, "_lock", None)
+        if lock is None:
+            return
+        with lock:
+            handle = getattr(self, "_writer_lease", None)
+            if handle is not None:
+                self._writer_lease = None
+                handle.close()
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def _validate_existing(self) -> int:
         if not self.path.exists():
@@ -86,6 +136,8 @@ class AppendOnlyJsonl:
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
         with self._lock:
+            if self._writer_lease is None:
+                raise LedgerBusyError("operational ledger writer lease is closed")
             sequence = self._sequence + 1
             record = {
                 "schema_version": "VERA_ARK_OPERATIONAL_EVENT_V1",
