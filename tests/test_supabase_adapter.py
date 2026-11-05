@@ -54,9 +54,37 @@ def test_mirror_does_not_call_provider_without_positive_sink_qualification(monke
 
 
 def test_invalid_environment_mirror_config_does_not_break_local_runtime(monkeypatch) -> None:
-    monkeypatch.setenv("SUPABASE_URL", "http://untrusted.example")
+    monkeypatch.setenv("VERA_ARK_SUPABASE_URL", "http://untrusted.example")
+    monkeypatch.setenv("VERA_ARK_SUPABASE_ANON_KEY", KEY)
+    monkeypatch.setenv("VERA_ARK_SUPABASE_PROJECT_REF", "example")
+    assert SupabaseEventAdapter.from_environment() is None
+
+
+def test_generic_shared_supabase_environment_cannot_bind_ark(monkeypatch) -> None:
+    monkeypatch.setenv("SUPABASE_URL", URL)
     monkeypatch.setenv("SUPABASE_ANON_KEY", KEY)
     assert SupabaseEventAdapter.from_environment() is None
+
+
+@pytest.mark.parametrize(
+    "url,ref,available",
+    [
+        (URL, "example", True),
+        (URL + "/", "example", True),
+        (URL, "anotherproject", False),
+        ("http://example.supabase.co", "example", False),
+        ("https://user:pass@example.supabase.co", "example", False),
+        (URL, "EXAMPLE", False),
+    ],
+)
+def test_environment_endpoint_must_match_pinned_ark_project(monkeypatch, url, ref, available) -> None:
+    monkeypatch.setenv("VERA_ARK_SUPABASE_URL", url)
+    monkeypatch.setenv("VERA_ARK_SUPABASE_ANON_KEY", KEY)
+    monkeypatch.setenv("VERA_ARK_SUPABASE_PROJECT_REF", ref)
+    adapter = SupabaseEventAdapter.from_environment()
+    assert (adapter is not None) is available
+    if adapter is not None:
+        assert adapter.sink_qualified is False
 
 
 def test_qualified_mirror_rejects_redirects_even_to_same_origin(monkeypatch) -> None:
@@ -133,8 +161,9 @@ def test_denied_rls_sink_never_claims_acceptance(monkeypatch) -> None:
 
 
 def test_doctor_distinguishes_configured_credentials_from_sink_qualification(monkeypatch, capsys) -> None:
-    monkeypatch.setenv("SUPABASE_URL", URL)
-    monkeypatch.setenv("SUPABASE_ANON_KEY", KEY)
+    monkeypatch.setenv("VERA_ARK_SUPABASE_URL", URL)
+    monkeypatch.setenv("VERA_ARK_SUPABASE_ANON_KEY", KEY)
+    monkeypatch.setenv("VERA_ARK_SUPABASE_PROJECT_REF", "example")
     assert cli.main(["doctor"]) == 0
     doctor = json.loads(capsys.readouterr().out)
     assert doctor["supabase_adapter_configured"] is True
