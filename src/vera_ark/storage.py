@@ -169,8 +169,13 @@ class SupabaseEventAdapter:
             or (port is not None and port <= 0)
         ):
             raise ValueError("Supabase mirror URL must be a credential-free HTTPS origin")
-        if not isinstance(anon_key, str) or not anon_key or any(ord(ch) <= 31 for ch in anon_key):
-            raise ValueError("Supabase mirror key must be non-empty")
+        # Python's http.client encodes header values as latin-1 and can raise
+        # UnicodeEncodeError on an unexpected non-ASCII token during emit.
+        # Supabase JWT/publishable key representations use visible ASCII.
+        if not isinstance(anon_key, str) or not anon_key or any(
+            not 33 <= ord(ch) <= 126 for ch in anon_key
+        ):
+            raise ValueError("Supabase mirror key must contain visible ASCII only")
         if not isinstance(table, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table) is None:
             raise ValueError("Supabase mirror table must be a simple SQL identifier")
         if not isinstance(timeout, (float, int)) or not math.isfinite(timeout) or timeout <= 0:
