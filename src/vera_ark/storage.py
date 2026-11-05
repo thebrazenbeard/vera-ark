@@ -6,6 +6,7 @@ import math
 import os
 from pathlib import Path
 import re
+import stat
 import threading
 from typing import Any, Protocol
 import urllib.error
@@ -63,15 +64,77 @@ class AppendOnlyJsonl:
         self._lock = threading.Lock()
         self._writer_lease = self._acquire_writer_lease()
         try:
+            self._writer_pid = os.getpid()
+            self._lease_identity = self._identity(self._writer_lease)
+            self._data_handle = self._open_data_handle()
+            self._data_identity = self._identity(self._data_handle)
+            self._writer_poisoned = False
             self._sequence = self._validate_existing()
         except BaseException:
             self.close()
             raise
 
+    @staticmethod
+    def _identity(handle) -> tuple[int, int]:
+        info = os.fstat(handle.fileno())
+        return (info.st_dev, info.st_ino)
+
+    def _open_data_handle(self):
+        if self.path.is_symlink():
+            raise LedgerBusyError("operational ledger path must not be a symlink")
+        flags = os.O_RDWR | os.O_CREAT | os.O_APPEND
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(self.path, flags, 0o600)
+        except OSError as exc:
+            raise LedgerBusyError("operational ledger open failed") from exc
+        try:
+            if os.name != "nt":
+                import fcntl
+
+                # Second lock prevents sidecar-unlink bypass on POSIX. Locks
+                # do not protect against a hostile writer ignoring advisory locks.
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return os.fdopen(fd, "a+", encoding="utf-8", newline="")
+        except (ImportError, OSError) as exc:
+            os.close(fd)
+            raise LedgerBusyError("operational ledger data-file lock unavailable") from exc
+        except BaseException:
+            os.close(fd)
+            raise
+
+    def _assert_current_writer(self) -> None:
+        if self._writer_lease is None or self._data_handle is None:
+            raise LedgerBusyError("operational ledger writer lease is closed")
+        if self._writer_poisoned:
+            raise LedgerBusyError("operational ledger writer is poisoned after ambiguous effect")
+        if os.getpid() != self._writer_pid:
+            raise LedgerBusyError("operational ledger writer lease was inherited by another process")
+        for path, expected in (
+            (self.path.with_name(self.path.name + ".writer.lock"), self._lease_identity),
+            (self.path, self._data_identity),
+        ):
+            try:
+                info = path.lstat()
+            except OSError as exc:
+                raise LedgerBusyError("operational ledger custody pathname disappeared") from exc
+            if stat.S_ISLNK(info.st_mode) or (info.st_dev, info.st_ino) != expected:
+                raise LedgerBusyError("operational ledger custody pathname changed")
+
     def _acquire_writer_lease(self):
         """Nonblocking, OS-released single-writer ownership across processes."""
         lease_path = self.path.with_name(self.path.name + ".writer.lock")
-        handle = lease_path.open("a+b")
+        if lease_path.is_symlink():
+            raise LedgerBusyError("operational ledger lock path must not be a symlink")
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(lease_path, flags, 0o600)
+        except OSError as exc:
+            raise LedgerBusyError("operational ledger writer lockfile unavailable") from exc
+        handle = os.fdopen(fd, "a+b")
         try:
             if os.name == "nt":
                 import msvcrt
@@ -95,7 +158,24 @@ class AppendOnlyJsonl:
         lock = getattr(self, "_lock", None)
         if lock is None:
             return
+        if os.getpid() != getattr(self, "_writer_pid", os.getpid()):
+            # A fork may copy a held non-reentrant threading.Lock. Never wait
+            # for the parent thread in the child; closing inherited descriptors
+            # cannot release the still-live parent's OS lease.
+            data = getattr(self, "_data_handle", None)
+            self._data_handle = None
+            if data is not None:
+                data.close()
+            lease = getattr(self, "_writer_lease", None)
+            self._writer_lease = None
+            if lease is not None:
+                lease.close()
+            return
         with lock:
+            data = getattr(self, "_data_handle", None)
+            if data is not None:
+                self._data_handle = None
+                data.close()
             handle = getattr(self, "_writer_lease", None)
             if handle is not None:
                 self._writer_lease = None
@@ -108,26 +188,26 @@ class AppendOnlyJsonl:
             pass
 
     def _validate_existing(self) -> int:
-        if not self.path.exists():
-            return 0
         expected = 1
-        with self.path.open("r", encoding="utf-8", newline="") as handle:
-            for line_number, line in enumerate(handle, start=1):
-                if not line.endswith("\n"):
-                    raise LedgerCorruptionError(
-                        f"{self.path} line {line_number} is not newline-terminated"
-                    )
-                try:
-                    record = strict_json_loads(line)
-                except (json.JSONDecodeError, ValueError) as exc:
-                    raise LedgerCorruptionError(
-                        f"{self.path} line {line_number} is invalid"
-                    ) from exc
-                if not isinstance(record, dict) or record.get("sequence") != expected:
-                    raise LedgerCorruptionError(
-                        f"{self.path} sequence mismatch at line {line_number}"
-                    )
-                expected += 1
+        handle = self._data_handle
+        handle.seek(0)
+        for line_number, line in enumerate(handle, start=1):
+            if not line.endswith("\n"):
+                raise LedgerCorruptionError(
+                    f"{self.path} line {line_number} is not newline-terminated"
+                )
+            try:
+                record = strict_json_loads(line)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise LedgerCorruptionError(
+                    f"{self.path} line {line_number} is invalid"
+                ) from exc
+            if not isinstance(record, dict) or record.get("sequence") != expected:
+                raise LedgerCorruptionError(
+                    f"{self.path} sequence mismatch at line {line_number}"
+                )
+            expected += 1
+        handle.seek(0, os.SEEK_END)
         return expected - 1
 
     def append(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -135,9 +215,14 @@ class AppendOnlyJsonl:
             raise ValueError("kind must be a non-empty string")
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
+        if os.getpid() != self._writer_pid:
+            raise LedgerBusyError("operational ledger writer lease inherited after fork")
         with self._lock:
-            if self._writer_lease is None:
-                raise LedgerBusyError("operational ledger writer lease is closed")
+            try:
+                self._assert_current_writer()
+            except LedgerBusyError:
+                self._writer_poisoned = True
+                raise
             sequence = self._sequence + 1
             record = {
                 "schema_version": "VERA_ARK_OPERATIONAL_EVENT_V1",
@@ -148,24 +233,38 @@ class AppendOnlyJsonl:
                 "payload": payload,
             }
             encoded = canonical_json(record) + "\n"
-            with self.path.open("a", encoding="utf-8", newline="") as handle:
-                handle.write(encoded)
-                handle.flush()
-                os.fsync(handle.fileno())
+            try:
+                self._data_handle.write(encoded)
+                self._data_handle.flush()
+                os.fsync(self._data_handle.fileno())
+            except BaseException:
+                self._writer_poisoned = True
+                raise
+            # The record has been durably appended. Never repeat its sequence
+            # if a subsequent custody-path check discovers an ambiguous move.
             self._sequence = sequence
+            try:
+                self._assert_current_writer()
+            except LedgerBusyError:
+                self._writer_poisoned = True
+                raise
             return record
 
     def read_all(self) -> list[dict[str, Any]]:
-        if not self.path.exists():
-            return []
-        result: list[dict[str, Any]] = []
-        with self.path.open("r", encoding="utf-8") as handle:
-            for line in handle:
+        if os.getpid() != self._writer_pid:
+            raise LedgerBusyError("operational ledger reader inherited after fork")
+        with self._lock:
+            self._assert_current_writer()
+            self._data_handle.flush()
+            self._data_handle.seek(0)
+            result: list[dict[str, Any]] = []
+            for line in self._data_handle:
                 value = strict_json_loads(line)
                 if not isinstance(value, dict):
                     raise LedgerCorruptionError("ledger record is not an object")
                 result.append(value)
-        return result
+            self._data_handle.seek(0, os.SEEK_END)
+            return result
 
 
 class EventAdapter(Protocol):
