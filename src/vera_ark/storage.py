@@ -184,9 +184,14 @@ class SupabaseEventAdapter:
 
     @classmethod
     def from_environment(cls) -> "SupabaseEventAdapter | None":
-        url = os.getenv("SUPABASE_URL", "")
-        key = os.getenv("SUPABASE_ANON_KEY", "")
-        if not url or not key:
+        # Generic SUPABASE_* variables may belong to a completely different
+        # service in this multi-project ecosystem. Never inherit them here.
+        url = os.getenv("VERA_ARK_SUPABASE_URL", "")
+        key = os.getenv("VERA_ARK_SUPABASE_ANON_KEY", "")
+        project_ref = os.getenv("VERA_ARK_SUPABASE_PROJECT_REF", "")
+        if not url or not key or re.fullmatch(r"[a-z0-9]+", project_ref) is None:
+            return None
+        if url.rstrip("/") != f"https://{project_ref}.supabase.co":
             return None
         try:
             return cls(url, key)
