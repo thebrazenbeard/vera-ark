@@ -127,6 +127,26 @@ class HeuristicPlanner:
 
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+_OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses"
+_MAX_OPENAI_RESPONSE_BYTES = 2_000_000
+
+
+class _DenyAuthenticatedRedirects(urllib.request.HTTPRedirectHandler):
+    """Never carry an authenticated provider request to a redirect target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
+def _require_openai_spend_authority() -> None:
+    """Default-deny: API-key possession or CLI selection is not payment authority.
+
+    The repo has no release-bound, approved paid-provider grant mechanism. This
+    intentionally has no environment or CLI shortcut; future activation needs
+    its own independently reviewed, explicitly authorized implementation.
+    """
+    raise PlannerUnavailable("OpenAI Responses API disabled under $0 budget policy")
 
 
 class OpenAIVisionPlanner:
@@ -178,6 +198,7 @@ class OpenAIVisionPlanner:
         frame: CapturedFrame,
         memory_context: Sequence[str] = (),
     ) -> ActionIntention:
+        _require_openai_spend_authority()
         # This is an external network request. Local memory file content may be
         # personal or private; merely selecting the OpenAI planner does not
         # consent to forwarding it. Only an explicit per-run opt-in may include it.
@@ -212,7 +233,7 @@ class OpenAIVisionPlanner:
             ],
         }
         request = urllib.request.Request(
-            "https://api.openai.com/v1/responses",
+            _OPENAI_RESPONSES_URL,
             data=json.dumps(request_body, allow_nan=False).encode("utf-8"),
             method="POST",
             headers={
@@ -221,12 +242,20 @@ class OpenAIVisionPlanner:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                body = response.read(2_000_000)
+            # The default urllib opener follows POST 30x responses and can
+            # forward Authorization to an unrelated origin. Keep the redirect
+            # policy private to this request; never change the global opener.
+            opener = urllib.request.build_opener(_DenyAuthenticatedRedirects())
+            with opener.open(request, timeout=self.timeout) as response:
+                if response.geturl() != _OPENAI_RESPONSES_URL:
+                    raise PlannerUnavailable("OpenAI response origin was not trusted")
+                body = response.read(_MAX_OPENAI_RESPONSE_BYTES + 1)
+                if len(body) > _MAX_OPENAI_RESPONSE_BYTES:
+                    raise PlannerUnavailable("OpenAI response exceeded size limit")
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             raise PlannerUnavailable(
                 f"OpenAI request unavailable: {type(exc).__name__}"
-            ) from exc
+            ) from None
         try:
             decoded = json.loads(body)
             text = self._extract_text(decoded)

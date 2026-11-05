@@ -124,9 +124,9 @@ This is a selected interface contract, **not an implemented, installed, signed, 
 
 ## Offline operation
 
-`vera-ark demo` uses a deterministic synthetic image and works without Windows capture, OpenAI, or Supabase. `--planner openai` is optional. With no `OPENAI_API_KEY`, or when the request or response fails validation, planning falls back to the local heuristic and logs `PLANNER_FALLBACK`.
+`vera-ark demo` uses a deterministic synthetic image and works without Windows capture, OpenAI, or Supabase. `--planner openai` is recognized but **cannot issue paid API requests under the standing $0 budget policy**; it falls back to the local heuristic and logs `PLANNER_FALLBACK`, even when `OPENAI_API_KEY` is set. A key, model selection, memory flag, or environment variable does not grant spending authority. There is deliberately no self-service spend-override switch. Any future provider activation requires Patrick's exact authorization and a separately reviewed, release-bound enforcement mechanism.
 
-The optional OpenAI planner submits a PNG as an image input to the Responses API, parses one JSON action proposal, reconstructs internal identifiers locally, and subjects the result to the same strict action schema. It never talks to the controller directly.
+The dormant optional OpenAI adapter is designed to submit a PNG as an image input to the Responses API, parse one JSON action proposal, reconstruct internal identifiers locally, and subject the result to the same strict action schema. Authenticated requests reject redirects and responses exceeding 2 MB. No external API call is permitted in the current release. The adapter never talks to the controller directly.
 
 ## Logs
 
@@ -140,9 +140,9 @@ Existing ledgers are strictly validated before append. A malformed or sequence-b
 ## Optional adapters
 
 - `--memory-file path.jsonl` accepts text-only rows shaped exactly as `{"text":"..."}`. Any corrupted row disables all memory context for that read.
-- Local memory text is **omitted by default from external OpenAI Requests**, even with `--planner openai` and `--memory-file`. To send the file's text for one explicitly selected run, require **all three** `--planner openai --memory-file path.jsonl --allow-memory-to-openai`. Selecting the cloud planner alone authorizes a frame request, **not** private-memory egress. This remains dry-run planning; it is not native or canonical memory admission.
+- Local memory text would be **omitted by default from external OpenAI Requests**, even with `--planner openai` and `--memory-file`. The adapter additionally requires all three `--planner openai --memory-file path.jsonl --allow-memory-to-openai` before it would consider memory text for external serialization. This memory flag does **not** authorize API spending or lift the current $0 network prohibition. It remains dry-run planning, not native or canonical memory admission.
 - `VERA_ARK_SUPABASE_URL`, `VERA_ARK_SUPABASE_ANON_KEY`, and `VERA_ARK_SUPABASE_PROJECT_REF` can identify a **disabled-by-default** optional event mirror. The URL must match `https://<project-ref>.supabase.co`; ambient generic `SUPABASE_*` variables are deliberately ignored, since they may belong to another project's provider. Custom domains need separately reviewed binding support. Configuration does **not** prove a usable sink or enable writes. The included migration is design-only, revokes `anon`/`authenticated` table access, and provides no INSERT policy; therefore that schema cannot be populated using the anon key. Do not weaken RLS or place a privileged service-role key on this Windows client to make mirroring work. A separately governed, credential-protected backend and independent deployed-schema/grant qualification are needed before enabling this feature. Even a 2xx HTTP response would only be an HTTP acknowledgment, not durable-event proof. The default local JSONL ledger remains authoritative for these operational observations.
-- `OPENAI_API_KEY` and optional `OPENAI_MODEL` enable the vision planner. No secret value is logged.
+- `OPENAI_API_KEY` and optional `OPENAI_MODEL` configure the dormant vision adapter; they do not enable paid calls. No secret value is logged.
 
 ## Development checks
 
