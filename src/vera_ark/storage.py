@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
+import re
 import threading
 from typing import Any, Protocol
 import urllib.error
+import urllib.parse
 import urllib.request
 from uuid import uuid4
 
@@ -123,8 +126,21 @@ class NullEventAdapter:
         return False
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Never forward the mirror credential or event payload to a redirect target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        del req, fp, code, msg, headers, newurl
+        return None
+
+
 class SupabaseEventAdapter:
-    """Optional best-effort event mirror. It is never an action or authority source."""
+    """Optional HTTP-ack mirror; not durable-delivery or action-authority evidence.
+
+    This project's design-only migration revokes anon/authenticated INSERT and
+    defines no corresponding RLS INSERT policy. The environment adapter therefore
+    starts unqualified and must not silently try to write to a provider.
+    """
 
     def __init__(
         self,
@@ -132,11 +148,39 @@ class SupabaseEventAdapter:
         anon_key: str,
         table: str = "vera_ark_operational_events",
         timeout: float = 5.0,
+        *,
+        sink_qualified: bool = False,
     ) -> None:
-        self.url = url.rstrip("/")
+        if not isinstance(url, str) or any(ord(ch) <= 32 for ch in url):
+            raise ValueError("Supabase mirror URL must be an HTTPS origin")
+        parsed = urllib.parse.urlsplit(url)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("invalid Supabase mirror origin port") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+            or (port is not None and port <= 0)
+        ):
+            raise ValueError("Supabase mirror URL must be a credential-free HTTPS origin")
+        if not isinstance(anon_key, str) or not anon_key or any(ord(ch) <= 31 for ch in anon_key):
+            raise ValueError("Supabase mirror key must be non-empty")
+        if not isinstance(table, str) or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table) is None:
+            raise ValueError("Supabase mirror table must be a simple SQL identifier")
+        if not isinstance(timeout, (float, int)) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("Supabase mirror timeout must be finite and positive")
+        self.url = f"https://{parsed.netloc}"
         self.anon_key = anon_key
         self.table = table
         self.timeout = timeout
+        # This is only a caller assertion; it is NOT live schema/RLS qualification.
+        self.sink_qualified = sink_qualified is True
 
     @classmethod
     def from_environment(cls) -> "SupabaseEventAdapter | None":
@@ -144,9 +188,15 @@ class SupabaseEventAdapter:
         key = os.getenv("SUPABASE_ANON_KEY", "")
         if not url or not key:
             return None
-        return cls(url, key)
+        try:
+            return cls(url, key)
+        except ValueError:
+            # Optional provider configuration must not interrupt local logging.
+            return None
 
     def emit(self, event: dict[str, Any]) -> bool:
+        if not self.sink_qualified:
+            return False
         body = canonical_json(event).encode("utf-8")
         request = urllib.request.Request(
             f"{self.url}/rest/v1/{self.table}",
@@ -160,8 +210,14 @@ class SupabaseEventAdapter:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                return 200 <= response.status < 300
+            # urllib's default redirect handler resends apikey and Authorization
+            # after cross-origin HTTP 302 redirects. Never follow any redirect.
+            opener = urllib.request.build_opener(_RejectRedirects())
+            with opener.open(request, timeout=self.timeout) as response:
+                # Prefer:return=minimal means a successful POST acknowledgment
+                # should have an empty body. Read at most one byte; never buffer
+                # attacker-controlled responses into the process.
+                return response.status in (200, 201, 204) and not response.read(1)
         except (urllib.error.URLError, TimeoutError, OSError):
             return False
 
