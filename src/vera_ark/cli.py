@@ -55,7 +55,7 @@ def doctor_command(_args: argparse.Namespace) -> int:
         "monitor_count": monitor_count,
         "capture_error": capture_error,
         "openai_key_present": bool(os.getenv("OPENAI_API_KEY")),
-        "supabase_adapter_configured": bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_ANON_KEY")),
+        "supabase_adapter_configured": SupabaseEventAdapter.from_environment() is not None,
         "supabase_adapter_qualified": False,
         "controller_backend": "dry-run-ds4-loopback-v1",
         "ds4_report_contract": DS4_REPORT_CONTRACT,
