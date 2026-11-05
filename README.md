@@ -140,7 +140,7 @@ Existing ledgers are strictly validated before append. A malformed or sequence-b
 ## Optional adapters
 
 - `--memory-file path.jsonl` accepts text-only rows shaped exactly as `{"text":"..."}`. Any corrupted row disables all memory context for that read.
-- `SUPABASE_URL` and `SUPABASE_ANON_KEY` enable best-effort event mirroring to `vera_ark_operational_events`. The included migration is a design artifact only and is not applied by the runtime.
+- `SUPABASE_URL` and `SUPABASE_ANON_KEY` configure a **disabled-by-default** optional event mirror. They do **not** prove a usable sink or enable writes. The included migration is design-only, revokes `anon`/`authenticated` table access, and provides no INSERT policy; therefore that schema cannot be populated using the anon key. Do not weaken RLS or place a privileged service-role key on this Windows client to make mirroring work. A separately governed, credential-protected backend and independent deployed-schema/grant qualification are needed before enabling this feature. Even a 2xx HTTP response would only be an HTTP acknowledgment, not durable-event proof. The default local JSONL ledger remains authoritative for these operational observations.
 - `OPENAI_API_KEY` and optional `OPENAI_MODEL` enable the vision planner. No secret value is logged.
 
 ## Development checks
