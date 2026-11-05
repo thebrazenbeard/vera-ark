@@ -139,10 +139,15 @@ class OpenAIVisionPlanner:
         api_key: str | None = None,
         model: str | None = None,
         timeout: float = 30.0,
+        *,
+        allow_external_memory: bool = False,
     ) -> None:
+        if type(allow_external_memory) is not bool:
+            raise ValueError("external memory consent must be an explicit boolean")
         self.api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY", "")
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-5")
         self.timeout = timeout
+        self.allow_external_memory = allow_external_memory
         if not self.api_key:
             raise PlannerUnavailable("OPENAI_API_KEY is not set")
 
@@ -173,7 +178,14 @@ class OpenAIVisionPlanner:
         frame: CapturedFrame,
         memory_context: Sequence[str] = (),
     ) -> ActionIntention:
-        memory = "\n".join(memory_context[:5]) if memory_context else "none"
+        # This is an external network request. Local memory file content may be
+        # personal or private; merely selecting the OpenAI planner does not
+        # consent to forwarding it. Only an explicit per-run opt-in may include it.
+        memory = (
+            "\n".join(memory_context[:5])
+            if self.allow_external_memory and memory_context
+            else "none (local context withheld from external provider)"
+        )
         prompt = (
             "Inspect this ARK frame and return one JSON object only with exactly "
             "these keys: action_type, x, y, duration_ms, reason. action_type must "
@@ -286,12 +298,18 @@ class FallbackPlanner:
             return self.fallback.plan(perception, frame, memory_context)
 
 
-def make_planner(name: str) -> ActionPlanner:
+def make_planner(name: str, *, allow_external_memory: bool = False) -> ActionPlanner:
+    if type(allow_external_memory) is not bool:
+        raise ValueError("external memory consent must be an explicit boolean")
+    if allow_external_memory and name != "openai":
+        raise ValueError("external memory consent only applies to the OpenAI planner")
     if name == "heuristic":
         return HeuristicPlanner()
     if name == "openai":
         try:
-            primary: ActionPlanner | None = OpenAIVisionPlanner()
+            primary: ActionPlanner | None = OpenAIVisionPlanner(
+                allow_external_memory=allow_external_memory
+            )
             reason = None
         except PlannerUnavailable as exc:
             primary = None

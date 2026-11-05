@@ -78,7 +78,12 @@ def _run_runtime(
     stop_file: Path,
     memory_file: Path | None,
     motion_guard_file: Path | None = None,
+    allow_memory_to_openai: bool = False,
 ) -> int:
+    if allow_memory_to_openai and (planner_name != "openai" or memory_file is None):
+        raise ValueError(
+            "--allow-memory-to-openai requires --planner openai and --memory-file"
+        )
     motion_guard = None
     if motion_guard_file is not None:
         from .physica_guard import PhysicaMotionGuard
@@ -112,7 +117,9 @@ def _run_runtime(
         ),
         capture=capture,
         perception=OfflinePerceptionEngine(),
-        planner=make_planner(planner_name),
+        planner=make_planner(
+            planner_name, allow_external_memory=allow_memory_to_openai
+        ),
         controller=controller,
         storage=storage,
         memory=memory,
@@ -136,6 +143,7 @@ def demo_command(args: argparse.Namespace) -> int:
             stop_file=args.stop_file,
             memory_file=args.memory_file,
             motion_guard_file=args.motion_guard_config,
+            allow_memory_to_openai=args.allow_memory_to_openai,
         )
     except Exception as exc:
         print(f"demo failed: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -176,6 +184,7 @@ def run_command(args: argparse.Namespace) -> int:
             stop_file=args.stop_file,
             memory_file=args.memory_file,
             motion_guard_file=args.motion_guard_config,
+            allow_memory_to_openai=args.allow_memory_to_openai,
         )
     except (CaptureError, OSError, ValueError) as exc:
         print(f"run failed: {type(exc).__name__}: {exc}", file=sys.stderr)
@@ -196,6 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--log-dir", type=Path)
     demo.add_argument("--stop-file", type=Path, default=Path(".vera_ark/STOP"))
     demo.add_argument("--memory-file", type=Path)
+    demo.add_argument(
+        "--allow-memory-to-openai",
+        action="store_true",
+        help="explicitly send --memory-file text to the external OpenAI Responses API for this run",
+    )
     demo.add_argument("--motion-guard-config", type=Path, help="explicit dry-run Physica world model JSON")
     demo.set_defaults(func=demo_command)
 
@@ -212,6 +226,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--log-dir", type=Path)
     run.add_argument("--stop-file", type=Path, default=Path(".vera_ark/STOP"))
     run.add_argument("--memory-file", type=Path)
+    run.add_argument(
+        "--allow-memory-to-openai",
+        action="store_true",
+        help="explicitly send --memory-file text to the external OpenAI Responses API for this run",
+    )
     run.add_argument("--motion-guard-config", type=Path, help="explicit dry-run Physica world model JSON")
     run.set_defaults(func=run_command)
     return parser
